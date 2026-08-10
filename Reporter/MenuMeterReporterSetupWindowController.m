@@ -191,7 +191,6 @@
 // unset and pop this window again on every launch.
 - (void)windowWillClose:(NSNotification *)notification {
     [MenuMeterReporterSettings sharedSettings].setupCompleted = YES;
-    completed = YES;
 
     // The app is normally an LSUIElement. Only drop back to accessory if nothing
     // else is on screen; at first launch the welcome window is usually open too,
