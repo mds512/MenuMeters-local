@@ -45,10 +45,21 @@ jobs:
             status=1
           fi
 
-          if grep -rIn --include='*.m' --include='*.h' \
-               -e 'firebase' -e 'crashlytics' -e 'sentry' -e 'analytics' \
-               -e 'AppCenter' -e 'GoogleAnalytics' . ; then
-            echo "::error::Telemetry SDK reference found."
+          # Match how a telemetry SDK actually gets used -- an import or a linked
+          # framework -- not the bare word. The UI text in this app contains the
+          # sentence "no update checks, no analytics", and a naive word search
+          # flags the very promise it is supposed to be verifying.
+          TELEMETRY='Firebase|Crashlytics|Sentry|AppCenter|GoogleAnalytics|Amplitude|Mixpanel|Segment|Bugsnag|Instabug'
+
+          if grep -rInE "#[[:space:]]*(import|include)[[:space:]]*[<\"][^>\"]*($TELEMETRY)" \
+               --include='*.m' --include='*.h' . ; then
+            echo "::error::Telemetry SDK import found."
+            status=1
+          fi
+
+          if grep -rInE "($TELEMETRY)\.(framework|xcframework)" \
+               --include='*.pbxproj' . ; then
+            echo "::error::Telemetry framework linked in the Xcode project."
             status=1
           fi
 
