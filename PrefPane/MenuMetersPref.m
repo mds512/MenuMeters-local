@@ -22,6 +22,7 @@
 //
 
 #import "MenuMetersPref.h"
+#import "MenuMetersPref+Reporting.h"
 #import "EMCLoginItem.h"
 #import "MenuMeterCPUExtra.h"
 #import "MenuMeterDiskExtra.h"
@@ -97,11 +98,6 @@ static void scChangeCallback(SCDynamicStoreRef store, CFArrayRef changedKeys, vo
 } // scChangeCallback
 
 @implementation MenuMetersPref
-{
-#ifdef SPARKLE
-    SUUpdater*updater;
-#endif
-}
 -(IBAction)showAlertConcerningSystemEventsEtc:(id)sender
 {
     NSButton*b=sender;
@@ -164,7 +160,8 @@ static void scChangeCallback(SCDynamicStoreRef store, CFArrayRef changedKeys, vo
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         [self.window makeKeyAndOrderFront:self];
     }
-    [self setupSparkleUI];
+    [self hideUpdaterUI];
+    [self setupReportingTab];
 
 #if (__MAC_OS_X_VERSION_MAX_ALLOWED >= 101600)
 	if (@available(macOS 10.16, *)) {
@@ -257,25 +254,14 @@ static void scChangeCallback(SCDynamicStoreRef store, CFArrayRef changedKeys, vo
     }
     
 }
-#ifdef SPARKLE
--(instancetype)initWithAboutFileName:(NSString*)about andUpdater:(SUUpdater*)updater_
-{
-    self=[super initWithWindowNibName:@"MenuMetersPref"];
-    updater=updater_;
-    [self initCommon:about];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(openPrefPane:) name:@"openPref" object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(hiddenBySystem:) name:@"hiddenBySystem" object:nil];
-    return self;
-}
-#else
 -(instancetype)initWithAboutFileName:(NSString*)about
 {
     self=[super initWithWindowNibName:@"MenuMetersPref"];
     [self initCommon:about];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(openPrefPane:) name:@"openPref" object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(hiddenBySystem:) name:@"hiddenBySystem" object:nil];
     return self;
 }
-#endif
 -(NSView*)mainView{
     return self.window.contentView;
 }
@@ -288,58 +274,19 @@ static void scChangeCallback(SCDynamicStoreRef store, CFArrayRef changedKeys, vo
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     }
 }
--(void)setupSparkleUI
+-(void)hideUpdaterUI
 {
-    // This is hacky, but if we're a Sparkle build this sets up the updater UI bits,
-    // and if we're not, just hide them
-#ifdef SPARKLE
-    if(updater.automaticallyChecksForUpdates){
-        NSTimeInterval updateInterval=updater.updateCheckInterval;
-        if(updateInterval<3600*24+1){
-            [updateIntervalButton selectItemAtIndex:1];
-        }else if(updateInterval<7*3600*24+1){
-            [updateIntervalButton selectItemAtIndex:2];
-        }else if(updateInterval<30*3600*24+1){
-            [updateIntervalButton selectItemAtIndex:3];
-        }else{
-            [updateIntervalButton selectItemAtIndex:1];
-        }
-    }else{
-        [updateIntervalButton selectItemAtIndex:0];
-    }
-#else
+    // The auto-updater was removed from this build, so the "check for updates"
+    // controls that still live in the About tab of the nib are hidden.
     sparkleUIContainer.hidden = YES;
-#endif
 }
+// Kept as no-op stubs only because the (now hidden) updater controls in the nib
+// still reference these selectors. This build has no auto-updater.
 -(IBAction)updateInterval:(id)sender
 {
-#ifdef SPARKLE
-    NSPopUpButton*button=sender;
-    NSInteger intervalInDays=1;
-    switch(button.indexOfSelectedItem){
-        case 0:
-            intervalInDays=-1;
-            break;
-        case 1:
-            intervalInDays=1;
-            break;
-        case 2:
-            intervalInDays=7;
-            break;
-        case 3:
-            intervalInDays=30;
-            break;
-        default:
-            intervalInDays=1;
-            break;
-    }
-    if(intervalInDays<=0){
-        [updater setAutomaticallyChecksForUpdates:NO];
-    }else{
-        [updater setAutomaticallyChecksForUpdates:YES];
-        [updater setUpdateCheckInterval:intervalInDays*3600*24];
-    }
-#endif
+}
+-(IBAction)checkForUpdates:(id)sender
+{
 }
 ///////////////////////////////////////////////////////////////
 //

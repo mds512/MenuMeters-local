@@ -1,0 +1,141 @@
+name: Build MenuMeters
+
+# Builds an unsigned (ad-hoc signed) universal MenuMeters.app and uploads it as
+# a downloadable artifact. Pushing a tag like v2.1.7 also attaches the zip to a
+# GitHub Release.
+#
+# No secrets, no certificates, no Apple Developer account required.
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  privacy-guard:
+    name: Check nothing phones home
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # This build is meant to talk to exactly one host: the URL the user types
+      # into Settings > Reporting. Fail loudly if an updater, an analytics SDK or
+      # a hardcoded endpoint ever creeps back in.
+      - name: Fail on reintroduced phone-home code
+        run: |
+          set -euo pipefail
+          status=0
+
+          if grep -rIn --include='*.m' --include='*.h' --include='*.plist' \
+               --include='*.pbxproj' --include='*.xib' \
+               -e 'Sparkle' -e 'SUUpdater' -e 'SUFeedURL' -e 'SUSendProfileInfo' . ; then
+            echo "::error::Sparkle / auto-updater references found."
+            status=1
+          fi
+
+          # Any http(s) literal in compiled sources is suspect. Comments and
+          # documentation are fine, so only flag lines that build a URL.
+          if grep -rIn --include='*.m' -E 'URLWithString:@"https?://' . ; then
+            echo "::error::Hardcoded remote URL found in source."
+            status=1
+          fi
+
+          if grep -rIn --include='*.m' --include='*.h' \
+               -e 'firebase' -e 'crashlytics' -e 'sentry' -e 'analytics' \
+               -e 'AppCenter' -e 'GoogleAnalytics' . ; then
+            echo "::error::Telemetry SDK reference found."
+            status=1
+          fi
+
+          if [ "$status" -eq 0 ]; then
+            echo "Clean: no updater, no telemetry, no hardcoded endpoints."
+          fi
+          exit "$status"
+
+  build:
+    name: Build app
+    runs-on: macos-14
+    needs: privacy-guard
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+
+      - name: Build (Release, universal, ad-hoc signed)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project MenuMeters.xcodeproj \
+            -scheme MenuMeters \
+            -configuration Release \
+            -derivedDataPath build \
+            ARCHS="x86_64 arm64" \
+            ONLY_ACTIVE_ARCH=NO \
+            MACOSX_DEPLOYMENT_TARGET=10.13 \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            ENABLE_HARDENED_RUNTIME=NO \
+            build
+
+      - name: Verify the built app
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release/MenuMeters.app"
+          test -d "$APP" || { echo "App not found at $APP"; exit 1; }
+
+          echo "--- architectures ---"
+          lipo -info "$APP/Contents/MacOS/MenuMeters"
+
+          echo "--- signature ---"
+          codesign -dv "$APP" 2>&1 || true
+
+          echo "--- linked frameworks ---"
+          otool -L "$APP/Contents/MacOS/MenuMeters" | sed 's/^/  /'
+
+          # Nothing should be embedded in Frameworks/ any more; Sparkle was the
+          # only thing that ever lived there.
+          if [ -d "$APP/Contents/Frameworks" ]; then
+            echo "::warning::Unexpected embedded frameworks:"
+            ls -la "$APP/Contents/Frameworks"
+          fi
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # ditto, not zip: it preserves the bundle's symlinks and resource forks.
+          ditto -c -k --keepParent \
+            "build/Build/Products/Release/MenuMeters.app" \
+            "dist/MenuMeters.zip"
+          ls -lh dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MenuMeters-app
+          path: dist/MenuMeters.zip
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/MenuMeters.zip
+          body: |
+            Unsigned build of MenuMeters with all phone-home removed and
+            user-configured metrics reporting added.
+
+            macOS will refuse to open it until you clear the download quarantine:
+
+                xattr -dr com.apple.quarantine /Applications/MenuMeters.app

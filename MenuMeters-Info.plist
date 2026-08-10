@@ -36,13 +36,18 @@
 	<string>MenuMetersMainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
-	<key>SUEnableAutomaticChecks</key>
-	<true/>
-	<key>SUPublicDSAKeyFile</key>
-	<string>dsa_pub.pem</string>
-	<key>SUScheduledCheckInterval</key>
-	<integer>36000</integer>
-	<key>SUSendProfileInfo</key>
-	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MenuMeters only uses the network to POST your metrics to the reporting URL you configure yourself. Nothing is sent anywhere else, and nothing is sent at all until you set that URL.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- The only outbound request this app makes is to the reporting URL the
+		     user types in themselves. That is very often a plain-http endpoint on
+		     the local network (a home server, an InfluxDB box, a Pi), so ATS has
+		     to allow it. There is no other network code in the app. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>
