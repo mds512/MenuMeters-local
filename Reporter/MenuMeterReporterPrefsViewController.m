@@ -212,6 +212,25 @@
     [previewScroll.widthAnchor constraintEqualToAnchor:stack.widthAnchor].active = YES;
     [previewScroll.heightAnchor constraintGreaterThanOrEqualToConstant:150].active = YES;
 
+    // --- Version -----------------------------------------------------------
+    // MenuMeters is an LSUIElement app, so it has no menu bar and no About box;
+    // the main-menu nib's Help menu is never shown. This is the one place the
+    // build is actually visible without resorting to Finder's Get Info.
+    NSString *shortVersion = [NSBundle mainBundle].infoDictionary[@"CFBundleShortVersionString"];
+    NSString *buildVersion = [NSBundle mainBundle].infoDictionary[@"CFBundleVersion"];
+    NSString *versionText;
+    if (shortVersion.length && buildVersion.length) {
+        versionText = [NSString stringWithFormat:NSLocalizedString(@"MenuMeters version %@ (build %@)",
+                                                                   @"reporting prefs"),
+                       shortVersion, buildVersion];
+    } else {
+        versionText = NSLocalizedString(@"MenuMeters version unknown", @"reporting prefs");
+    }
+    NSTextField *versionLabel = [self labelWithText:versionText bold:NO];
+    versionLabel.textColor = [NSColor secondaryLabelColor];
+    versionLabel.selectable = YES;   // so it can be copied into a bug report
+    [stack addArrangedSubview:versionLabel];
+
     self.view = root;
 
     [[NSNotificationCenter defaultCenter] addObserver:self

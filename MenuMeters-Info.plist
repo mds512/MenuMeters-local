@@ -22,8 +22,10 @@
 	<string>MM_VERSION</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<!-- Sortable build number, not the displayed version. See
+	     InfoPlistPreprocessor.h for why these two differ. -->
 	<key>CFBundleVersion</key>
-	<string>MM_VERSION</string>
+	<string>MM_BUILD</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
