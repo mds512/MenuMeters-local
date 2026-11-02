@@ -72,6 +72,8 @@
 		33F0921923673DAC00953CAB /* releases.html in Resources */ = {isa = PBXBuildFile; fileRef = 33F0921823673DAC00953CAB /* releases.html */; };
 		AA000000000000000000000B /* MenuMeterReporterSettings.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000002 /* MenuMeterReporterSettings.m */; };
 		AA0000000000000000000017 /* MenuMeterAlerts.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000016 /* MenuMeterAlerts.m */; };
+		AA000000000000000000001A /* MenuMeterAlertsPrefsViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000019 /* MenuMeterAlertsPrefsViewController.m */; };
+		AA000000000000000000001D /* MenuMetersPref+Alerts.m in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001C /* MenuMetersPref+Alerts.m */; };
 		AA000000000000000000000D /* MenuMeterReporter.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000004 /* MenuMeterReporter.m */; };
 		AA000000000000000000000F /* MenuMeterReporterPrefsViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000006 /* MenuMeterReporterPrefsViewController.m */; };
 		AA0000000000000000000011 /* MenuMeterReporterSetupWindowController.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* MenuMeterReporterSetupWindowController.m */; };
@@ -225,6 +227,8 @@
 		AA0000000000000000000002 /* MenuMeterReporterSettings.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "MenuMeterReporterSettings.m"; sourceTree = "<group>"; };
 		AA0000000000000000000015 /* MenuMeterAlerts.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "MenuMeterAlerts.h"; sourceTree = "<group>"; };
 		AA0000000000000000000016 /* MenuMeterAlerts.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "MenuMeterAlerts.m"; sourceTree = "<group>"; };
+		AA0000000000000000000018 /* MenuMeterAlertsPrefsViewController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "MenuMeterAlertsPrefsViewController.h"; sourceTree = "<group>"; };
+		AA0000000000000000000019 /* MenuMeterAlertsPrefsViewController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "MenuMeterAlertsPrefsViewController.m"; sourceTree = "<group>"; };
 		AA0000000000000000000003 /* MenuMeterReporter.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "MenuMeterReporter.h"; sourceTree = "<group>"; };
 		AA0000000000000000000004 /* MenuMeterReporter.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "MenuMeterReporter.m"; sourceTree = "<group>"; };
 		AA0000000000000000000005 /* MenuMeterReporterPrefsViewController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "MenuMeterReporterPrefsViewController.h"; sourceTree = "<group>"; };
@@ -233,6 +237,8 @@
 		AA0000000000000000000008 /* MenuMeterReporterSetupWindowController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "MenuMeterReporterSetupWindowController.m"; sourceTree = "<group>"; };
 		AA0000000000000000000009 /* MenuMetersPref+Reporting.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "MenuMetersPref+Reporting.h"; sourceTree = "<group>"; };
 		AA000000000000000000000A /* MenuMetersPref+Reporting.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "MenuMetersPref+Reporting.m"; sourceTree = "<group>"; };
+		AA000000000000000000001B /* MenuMetersPref+Alerts.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "MenuMetersPref+Alerts.h"; sourceTree = "<group>"; };
+		AA000000000000000000001C /* MenuMetersPref+Alerts.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "MenuMetersPref+Alerts.m"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -464,6 +470,8 @@
 				D4E4BFA104F333B100A87BC9 /* MenuMetersPref.m */,
 				AA0000000000000000000009 /* MenuMetersPref+Reporting.h */,
 				AA000000000000000000000A /* MenuMetersPref+Reporting.m */,
+				AA000000000000000000001B /* MenuMetersPref+Alerts.h */,
+				AA000000000000000000001C /* MenuMetersPref+Alerts.m */,
 				D4E4BFB904F333D000A87BC9 /* Resources */,
 				908780A71FB087B90053DDC5 /* EMCLoginItem.h */,
 				908780A91FB087D70053DDC5 /* EMCLoginItem.m */,
@@ -539,6 +547,8 @@
 				AA0000000000000000000008 /* MenuMeterReporterSetupWindowController.m */,
 				AA0000000000000000000015 /* MenuMeterAlerts.h */,
 				AA0000000000000000000016 /* MenuMeterAlerts.m */,
+				AA0000000000000000000018 /* MenuMeterAlertsPrefsViewController.h */,
+				AA0000000000000000000019 /* MenuMeterAlertsPrefsViewController.m */,
 			);
 			path = Reporter;
 			sourceTree = "<group>";
@@ -669,6 +679,8 @@
 			files = (
 				AA000000000000000000000B /* MenuMeterReporterSettings.m in Sources */,
 				AA0000000000000000000017 /* MenuMeterAlerts.m in Sources */,
+				AA000000000000000000001A /* MenuMeterAlertsPrefsViewController.m in Sources */,
+				AA000000000000000000001D /* MenuMetersPref+Alerts.m in Sources */,
 				AA000000000000000000000D /* MenuMeterReporter.m in Sources */,
 				AA000000000000000000000F /* MenuMeterReporterPrefsViewController.m in Sources */,
 				AA0000000000000000000011 /* MenuMeterReporterSetupWindowController.m in Sources */,

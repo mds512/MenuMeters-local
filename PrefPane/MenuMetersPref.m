@@ -23,6 +23,7 @@
 
 #import "MenuMetersPref.h"
 #import "MenuMetersPref+Reporting.h"
+#import "MenuMetersPref+Alerts.h"
 #import "EMCLoginItem.h"
 #import "MenuMeterCPUExtra.h"
 #import "MenuMeterDiskExtra.h"
@@ -162,6 +163,7 @@ static void scChangeCallback(SCDynamicStoreRef store, CFArrayRef changedKeys, vo
     }
     [self hideUpdaterUI];
     [self setupReportingTab];
+    [self setupAlertsTab];
 
 #if (__MAC_OS_X_VERSION_MAX_ALLOWED >= 101600)
 	if (@available(macOS 10.16, *)) {

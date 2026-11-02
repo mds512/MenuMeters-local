@@ -43,8 +43,20 @@ extern NSString * const kMenuMeterAlertSectionNetwork;
 // Atomic: set on whichever queue delivery finished on, read from the UI.
 @property (atomic, readonly, copy) NSString *deliveryRouteDescription;
 
+// Human-readable list of the armed thresholds, for the settings tab.
+@property (nonatomic, readonly, copy) NSString *armedSummary;
+
+// What the last sample actually saw, keyed by metric name ("temperature",
+// "cpu", "disk", "network"), already formatted. nil until a sample has been
+// taken -- which is itself the useful signal that nothing is sampling yet.
+@property (atomic, readonly, copy, nullable) NSDictionary<NSString *, NSString *> *lastObservedValues;
+
 // Idempotent; safe to call repeatedly. Main thread.
 - (void)prepare;
+
+// Posts a notification immediately, bypassing thresholds, streaks and cooldown.
+// The completion reports which route delivered it, and runs on the main thread.
+- (void)sendTestNotificationWithCompletion:(nullable void (^)(BOOL delivered, NSString *route))completion;
 
 // Evaluates one sample. Must be called on the reporter's serial work queue: the
 // streak and cooldown state below is not otherwise synchronised.

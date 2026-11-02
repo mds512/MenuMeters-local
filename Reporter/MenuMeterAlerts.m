@@ -39,6 +39,7 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
 // read on the sampling queue, hence atomic.
 @property (atomic, assign) BOOL notificationsAuthorized;
 @property (atomic, copy) NSString *deliveryRouteDescription;
+@property (atomic, copy, nullable) NSDictionary<NSString *, NSString *> *lastObservedValues;
 @end
 
 @implementation MenuMeterAlerts {
@@ -100,12 +101,51 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
     return self.requiredSections.count > 0;
 }
 
+- (NSString *)armedSummary {
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:kAlertsEnabledPref]) {
+        return NSLocalizedString(@"Alerts are switched off (AlertsEnabled is false).", @"alert");
+    }
+    NSMutableArray *parts = [NSMutableArray array];
+    double value = 0;
+    if ((value = [self thresholdForKey:kAlertTemperaturePref]) > 0) {
+        [parts addObject:[NSString stringWithFormat:NSLocalizedString(@"temperature above %.0f °C", @"alert"), value]];
+    }
+    if ((value = [self thresholdForKey:kAlertCPUPref]) > 0) {
+        [parts addObject:[NSString stringWithFormat:NSLocalizedString(@"CPU above %.0f%%", @"alert"), value]];
+    }
+    if ((value = [self thresholdForKey:kAlertDiskPref]) > 0) {
+        [parts addObject:[NSString stringWithFormat:NSLocalizedString(@"disk above %.0f%% full", @"alert"), value]];
+    }
+    if ((value = [self thresholdForKey:kAlertNetworkPref]) > 0) {
+        [parts addObject:[NSString stringWithFormat:NSLocalizedString(@"network above %@/s", @"alert"),
+                          [self humanBytes:value]]];
+    }
+    if (parts.count == 0) {
+        return NSLocalizedString(@"Alerts are on, but no threshold is set, so nothing is watched.", @"alert");
+    }
+    return [NSString stringWithFormat:NSLocalizedString(@"Watching: %@. Re-notifies at most every %.0f min, after %ld samples in a row.", @"alert"),
+            [parts componentsJoinedByString:@", "], [self cooldown] / 60.0, (long)[self requiredConsecutive]];
+}
+
+- (void)sendTestNotificationWithCompletion:(void (^)(BOOL, NSString *))completion {
+    [self prepare];
+    [self deliverTitle:NSLocalizedString(@"MenuMeters test", @"alert")
+                  body:NSLocalizedString(@"If you can see this, threshold alerts can reach you.", @"alert")
+            completion:^(BOOL delivered, NSString *route) {
+        if (!completion) return;
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(delivered, route); });
+    }];
+}
+
 #pragma mark - Evaluation
 
 - (void)evaluateSnapshot:(NSDictionary *)snapshot {
 
     if (!snapshot) return;
 
+    // Recorded purely so the Notifs tab can show what the engine is actually
+    // seeing. If this stays empty, nothing is sampling.
+    NSMutableDictionary *observed = [NSMutableDictionary dictionary];
     double limit = 0;
 
     // --- Temperature ---
@@ -123,6 +163,9 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
                                   ?: snapshot[kMenuMeterAlertSectionTemperature][@"sensor"]
                                   ?: NSLocalizedString(@"Temperature", @"alert"),
                               celsius.doubleValue, limit]];
+        observed[@"temperature"] = celsius
+            ? [NSString stringWithFormat:@"%.1f °C (limit %.0f °C)", celsius.doubleValue, limit]
+            : NSLocalizedString(@"no reading from the selected sensor", @"alert");
     }
 
     // --- CPU ---
@@ -137,6 +180,9 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
                         body:[NSString stringWithFormat:
                               NSLocalizedString(@"CPU is at %.0f%%, over the %.0f%% limit.", @"alert"),
                               percent.doubleValue, limit]];
+        observed[@"cpu"] = percent
+            ? [NSString stringWithFormat:@"%.0f%% (limit %.0f%%)", percent.doubleValue, limit]
+            : NSLocalizedString(@"no reading", @"alert");
     }
 
     // --- Disk: the fullest mounted volume ---
@@ -160,6 +206,10 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
                               NSLocalizedString(@"%@ is %.0f%% full, over the %.0f%% limit.", @"alert"),
                               fullestName ?: NSLocalizedString(@"A volume", @"alert"),
                               fullestPercent, limit]];
+        observed[@"disk"] = (fullestPercent >= 0)
+            ? [NSString stringWithFormat:@"%@ %.0f%% full (limit %.0f%%)",
+               fullestName ?: @"?", fullestPercent, limit]
+            : NSLocalizedString(@"no volumes read", @"alert");
     }
 
     // --- Network: whichever direction is busier ---
@@ -182,7 +232,13 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
                               downBusier ? NSLocalizedString(@"download", @"alert")
                                          : NSLocalizedString(@"upload", @"alert"),
                               [self humanBytes:busiest], [self humanBytes:limit]]];
+        observed[@"network"] = haveRate
+            ? [NSString stringWithFormat:@"%@/s %@ (limit %@/s)", [self humanBytes:busiest],
+               downBusier ? @"down" : @"up", [self humanBytes:limit]]
+            : NSLocalizedString(@"no rate yet (needs two samples)", @"alert");
     }
+
+    self.lastObservedValues = observed;
 }
 
 // Streak and cooldown bookkeeping, shared by every metric.
@@ -259,6 +315,10 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
 }
 
 - (void)deliverTitle:(NSString *)title body:(NSString *)body {
+    [self deliverTitle:title body:body completion:nil];
+}
+
+- (void)deliverTitle:(NSString *)title body:(NSString *)body completion:(void (^)(BOOL, NSString *))completion {
 
     if (self.notificationsAuthorized) {
         if (@available(macOS 10.14, *)) {
@@ -278,10 +338,13 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
                     if (error) {
                         NSLog(@"MenuMeterAlerts: notification refused (%@); retrying via osascript.",
                               error.localizedDescription);
-                        [self deliverViaOsascriptTitle:title body:body];
+                        BOOL ok = [self deliverViaOsascriptTitle:title body:body];
+                        if (completion) completion(ok, self.deliveryRouteDescription);
+                        return;
                     }
+                    self.deliveryRouteDescription = @"Notification Centre";
+                    if (completion) completion(YES, self.deliveryRouteDescription);
                 }];
-                self.deliveryRouteDescription = @"Notification Centre";
                 return;
             }
             @catch (NSException *exception) {
@@ -290,7 +353,8 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
         }
     }
 
-    [self deliverViaOsascriptTitle:title body:body];
+    BOOL ok = [self deliverViaOsascriptTitle:title body:body];
+    if (completion) completion(ok, self.deliveryRouteDescription);
 }
 
 // Fallback for a build macOS will not grant notification rights to. The
