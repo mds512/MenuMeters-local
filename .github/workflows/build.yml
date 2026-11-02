@@ -13,15 +13,26 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Read-only by default. Only the release job below raises this to write, and it
+# does nothing but attach an already-built zip to a release -- it never runs
+# xcodebuild or any third-party action against the source. That way a compromised
+# action in the normal build path has no token it can write to the repo with.
 permissions:
-  contents: write
+  contents: read
+
+# Every action below is pinned to a full commit SHA rather than a tag. A tag such
+# as @v4 is a mutable pointer: the owner, or whoever takes over that account, can
+# repoint it at new code and your next build silently runs it. That is how
+# tj-actions/changed-files was compromised in March 2025 (CVE-2025-30066). A SHA
+# is content-addressed and cannot be repointed. The trailing comment is the
+# human-readable version; Dependabot updates both together.
 
 jobs:
   privacy-guard:
     name: Check nothing phones home
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262          # v4
 
       # This build is meant to talk to exactly one host: the URL the user types
       # into Settings > Reporting. Fail loudly if an updater, an analytics SDK or
@@ -73,7 +84,7 @@ jobs:
     runs-on: macos-14
     needs: privacy-guard
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262          # v4
 
       - name: Show toolchain
         run: |
@@ -132,15 +143,31 @@ jobs:
           ls -lh dist
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: MenuMeters-app
           path: dist/MenuMeters.zip
           if-no-files-found: error
 
+  # Separate job purely so `contents: write` is scoped to it. It is the only
+  # place in this workflow with a token that can write to the repo, it runs no
+  # build and no code from the source tree, and it only fires for a v* tag.
+  release:
+    name: Attach to release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download the built app
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: MenuMeters-app
+          path: dist
+
       - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           files: dist/MenuMeters.zip
           body: |
