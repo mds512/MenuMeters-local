@@ -46,10 +46,15 @@
 }
 +(NSString*)defaultSensor
 {
+    // Was a plain `if(!foo)` lazy init. The reporter calls this from its work
+    // queue while the CPU extra and the prefs pane call it on the main thread, and
+    // two threads racing on a __strong static can both assign it, which under ARC
+    // releases one of the two values twice.
     static NSString*foo=nil;
-    if(!foo){
+    static dispatch_once_t defaultSensorOnce;
+    dispatch_once(&defaultSensorOnce,^{
         foo=[self defaultSensorRealWork];
-    }
+    });
     return foo;
 }
 +(NSString*)defaultSensorRealWork
@@ -68,26 +73,36 @@
         if([sensor hasPrefix:@"TC"])
             return sensor;
     }
+    // sensorNames can be non-nil but empty (no matching sensors), in which case
+    // indexing [0] raises NSRangeException.
+    if([[self sensorNames] count]==0)
+        return candidate;
     return [self sensorNames][0];
 }
 +(NSString*)displayNameForSensor:(NSString*)name
 {
 #if TARGET_CPU_X86_64
+    // Same race as defaultSensor, but worse: a second thread could previously see
+    // the dictionary after it was assigned but before it was filled, and get nil
+    // for a sensor that does have a name.
     static NSMutableDictionary*dict=nil;
-    if(!dict){
-        dict=[NSMutableDictionary dictionary];
+    static dispatch_once_t displayNameOnce;
+    dispatch_once(&displayNameOnce,^{
+        NSMutableDictionary*built=[NSMutableDictionary dictionary];
         NSDictionary*rawDict=SMCHumanReadableDescriptions();
         for(NSString*key in [self sensorNames]){
             NSString*s=rawDict[key];
             if(s){
                 s=[s stringByReplacingOccurrencesOfString:@"(DegC)" withString:@""];
                 s=[s stringByReplacingOccurrencesOfString:[NSString stringWithFormat:@"(%@)",key] withString:@""];
-                dict[key]=[NSString stringWithFormat:@"%@: %@",key,s];
+                built[key]=[NSString stringWithFormat:@"%@: %@",key,s];
             }else{
-                dict[key]=key;
+                built[key]=key;
             }
         }
-    }
+        // Published only once fully populated.
+        dict=built;
+    });
     return dict[name];
 #elif TARGET_CPU_ARM64
     return name;

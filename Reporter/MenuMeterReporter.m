@@ -190,6 +190,20 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
         return;
     }
 
+    // App Transport Security only permits plain http on the local network, so
+    // say why rather than letting this come back as an opaque -1022. Checked
+    // here as well as in isConfigured because the "send now" test button does
+    // not go through the scheduler.
+    if (settings.urlIsBlockedInsecureHTTP) {
+        [self finishWithSuccess:NO
+                        message:[NSString stringWithFormat:
+                                 NSLocalizedString(@"Refusing to send: %@ is a plain http:// address outside the local network, so the metrics and any auth header would go out in cleartext. Use https://, or an address on your own network.",
+                                                   @"reporter status"),
+                                 url.host]
+                     completion:completion];
+        return;
+    }
+
     // dataWithJSONObject: raises rather than returning an error for an invalid
     // object graph, and this runs on a background queue where an exception would
     // take the app down. Check first.

@@ -368,6 +368,17 @@
     if (settings.enabled && settings.url == nil && urlField.stringValue.length > 0) {
         statusLabel.stringValue = NSLocalizedString(@"That does not look like an http:// or https:// URL.",
                                                     @"reporting prefs");
+        statusLabel.textColor = [NSColor systemRedColor];
+    } else if (settings.urlIsBlockedInsecureHTTP) {
+        // ATS only allows plain http on the local network, so say so here rather
+        // than letting the first send fail with something cryptic.
+        statusLabel.stringValue = NSLocalizedString(@"Plain http:// is only allowed on your local network. Use https:// for anything else.",
+                                                    @"reporting prefs");
+        statusLabel.textColor = [NSColor systemRedColor];
+    } else if (settings.authHeaderValueStorageFailed) {
+        statusLabel.stringValue = NSLocalizedString(@"The header value could not be saved to the keychain, so it will be forgotten when MenuMeters quits.",
+                                                    @"reporting prefs");
+        statusLabel.textColor = [NSColor systemRedColor];
     }
 }
 

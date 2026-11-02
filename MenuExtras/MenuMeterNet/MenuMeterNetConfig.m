@@ -593,32 +593,77 @@ static void scChangeCallback(SCDynamicStoreRef store, CFArrayRef changedKeys, vo
 //
 ///////////////////////////////////////////////////////////////
 
-// taken from https://stackoverflow.com/a/12310154/239243
-- (NSString *)runCommand:(NSString *)commandToRun
-{
-    NSTask *task = [[NSTask alloc] init];
-    [task setLaunchPath:@"/bin/sh"];
+// Runs a tool directly, with its arguments passed as a list.
+//
+// This replaces an earlier version that built a command string and handed it to
+// /bin/sh -c. That interpolated the BSD interface name straight into a shell
+// command, which made any interface name containing shell metacharacters
+// executable. Interface names come from SystemConfiguration (DeviceName, or the
+// PPP InterfaceName), so writing one requires admin rights -- but there is no
+// reason to keep a shell in the path at all. With an argument vector there is no
+// shell to inject into.
+//
+// stdout and stderr share one pipe, as they did before: ifconfig reports an
+// unknown interface on stderr and the parsing below looks for that text.
+- (NSString *)runTool:(NSString *)launchPath arguments:(NSArray *)arguments {
 
-    NSArray *arguments = [NSArray arrayWithObjects:
-                          @"-c" ,
-                          [NSString stringWithFormat:@"%@", commandToRun],
-                          nil];
-//    NSLog(@"run command:%@", commandToRun);
-    [task setArguments:arguments];
+	if (![[NSFileManager defaultManager] isExecutableFileAtPath:launchPath]) return nil;
 
-    NSPipe *pipe = [NSPipe pipe];
-    [task setStandardOutput:pipe];
-    [task setStandardError:pipe];
+	NSTask *task = [[NSTask alloc] init];
+	[task setLaunchPath:launchPath];
+	[task setArguments:arguments];
 
-    NSFileHandle *file = [pipe fileHandleForReading];
-    
-    [task launch];
+	NSPipe *pipe = [NSPipe pipe];
+	[task setStandardOutput:pipe];
+	[task setStandardError:pipe];
+	// Do not let the child inherit our stdin.
+	[task setStandardInput:[NSFileHandle fileHandleWithNullDevice]];
 
-    NSData *data = [file readDataToEndOfFile];
-    [file closeFile];
+	NSFileHandle *file = [pipe fileHandleForReading];
+	NSData *data = nil;
 
-    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    return output;
+	// -launch raises rather than returning an error when the tool cannot be
+	// started. Unhandled, that is a crash in a menu update.
+	@try {
+		[task launch];
+		data = [file readDataToEndOfFile];
+	}
+	@catch (NSException *exception) {
+		NSLog(@"MenuMeterNetConfig unable to run %@: %@", launchPath, [exception reason]);
+		return nil;
+	}
+	@finally {
+		[file closeFile];
+	}
+
+	if (!data) return nil;
+	return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+}
+
+// Stands in for the `grep`/`egrep` that used to be on the other side of a pipe.
+- (NSString *)linesIn:(NSString *)text containingAnyOf:(NSArray *)needles {
+
+	if (!text) return nil;
+	NSMutableArray *kept = [NSMutableArray array];
+	for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
+		for (NSString *needle in needles) {
+			if ([line rangeOfString:needle].location != NSNotFound) {
+				[kept addObject:line];
+				break;
+			}
+		}
+	}
+	return [kept componentsJoinedByString:@"\n"];
+}
+
+// A BSD interface name is short and alphanumeric. Belt and braces now that the
+// name no longer reaches a shell: anything unexpected is simply not looked up.
+- (BOOL)isPlausibleBSDInterfaceName:(NSString *)name {
+
+	if ((name.length == 0) || (name.length > 24)) return NO;
+	NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:
+								@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"];
+	return ([name rangeOfCharacterFromSet:[allowed invertedSet]].location == NSNotFound);
 }
 
 - (NSNumber *)speedForInterfaceName:(NSString*)bsdInterface{
@@ -647,13 +692,32 @@ static void scChangeCallback(SCDynamicStoreRef store, CFArrayRef changedKeys, vo
 }
 - (NSNumber*)speedForAirport
 {
-    NSString*line=[self runCommand:@"/System/Library/PrivateFrameworks/Apple80211.framework/Versions/A/Resources/airport -I | grep maxRate"];
+    // Apple removed this private tool in macOS 14.4. runTool: checks for it, but
+    // returning nil here explicitly is what lets the caller fall through to IOKit
+    // and then ifconfig.
+    //
+    // Worth being precise about, because the old shell version got this wrong: a
+    // missing binary made sh print "...airport: No such file or directory", that
+    // text was captured, it contains a colon, so the parser below accepted it and
+    // returned a speed of 0. A non-nil 0 satisfied the caller's `if(x)` check, so
+    // Wi-Fi link speed came back as 0 on every macOS from 14.4 onward instead of
+    // falling through to a method that works.
+    NSString*output=[self runTool:@"/System/Library/PrivateFrameworks/Apple80211.framework/Versions/A/Resources/airport"
+                        arguments:@[@"-I"]];
+    NSString*line=[self linesIn:output containingAnyOf:@[@"maxRate"]];
+    if(line.length==0){
+        return nil;
+    }
     NSRange r=[line rangeOfString:@":"];
     if(r.location==NSNotFound){
         return nil;
     }
     line=[line substringFromIndex:r.location+1];
-    return [NSNumber numberWithDouble:[line doubleValue]*1000*1000];
+    double rate=[line doubleValue]*1000*1000;
+    if(rate<=0){
+        return nil;
+    }
+    return [NSNumber numberWithDouble:rate];
 }
 - (NSNumber *)speedForInterfaceNameViaIfConfig:(NSString *)bsdInterface {
 
@@ -665,10 +729,17 @@ static void scChangeCallback(SCDynamicStoreRef store, CFArrayRef changedKeys, vo
     e.g. for Catalina. Unfortunately the ioctl used there is not exposed in the standard development headers, although you can presumably use it by copying the content of the private headers.
      Here instead I just directly call ifconfig.
      */
-    NSString*line=[self runCommand:[NSString stringWithFormat:@"ifconfig -v %@ | egrep 'link rate|uplink'",bsdInterface]];
-    if([line containsString:@"does not"]){
+    if (![self isPlausibleBSDInterfaceName:bsdInterface]) {
+        NSLog(@"MenuMeterNetConfig ignoring implausible interface name.");
+        return [NSNumber numberWithLong:0];
+    }
+    NSString*output=[self runTool:@"/sbin/ifconfig" arguments:@[@"-v",bsdInterface]];
+    // Checked against the whole output, before filtering: ifconfig writes this on
+    // stderr, which never went through the old `egrep` either.
+    if([output containsString:@"does not"]){
          return [NSNumber numberWithLong:0];
     }
+    NSString*line=[self linesIn:output containingAnyOf:@[@"link rate",@"uplink"]];
     NSRange r=[line rangeOfString:@"/"];
     if(r.location==NSNotFound){
         r=[line rangeOfString:@": "];
@@ -689,7 +760,13 @@ static void scChangeCallback(SCDynamicStoreRef store, CFArrayRef changedKeys, vo
     }else{
         factor=0;
     }
-    
+
+    // With no unit matched, r.location is NSNotFound and the substring below
+    // would raise NSRangeException. Reachable for real: a line such as
+    // "link rate: unknown" passes the ": " test above and matches no unit.
+    if(factor==0){
+        return [NSNumber numberWithLong:0];
+    }
     line=[line substringToIndex:r.location];
     return [NSNumber numberWithDouble:[line doubleValue]*factor];
 }

@@ -1,7 +1,20 @@
 #include <stdio.h>
+#include <pthread.h>
 #include "smc_reader.h"
 
-static io_connect_t conn;
+// `conn` is process-wide state, and since the metrics reporter was added there
+// are two callers on different threads: the CPU menu extra on the main thread and
+// the reporter on its own work queue. Unsynchronised, SMCOpen could overwrite a
+// live connection (leaking the old io_connect_t on every sample) while SMCClose
+// could close the connection another thread was in the middle of using, which
+// shows up as a sensor reading that is suddenly zero or absent.
+//
+// So: one mutex over `conn`, and an open count so the first SMCOpen connects and
+// only the last SMCClose disconnects. Callers keep their existing
+// open / read / close shape and do not need to change.
+static io_connect_t    conn;
+static pthread_mutex_t smcMutex = PTHREAD_MUTEX_INITIALIZER;
+static unsigned int    smcOpenCount;
 
 kern_return_t SMCOpen(void)
 {
@@ -9,9 +22,20 @@ kern_return_t SMCOpen(void)
     io_iterator_t iterator;
     io_object_t   device;
 
+    pthread_mutex_lock(&smcMutex);
+
+    // Already connected: take a reference and reuse it.
+    if (smcOpenCount > 0)
+    {
+        smcOpenCount++;
+        pthread_mutex_unlock(&smcMutex);
+        return kIOReturnSuccess;
+    }
+
     result = IOServiceGetMatchingServices(kIOMasterPortDefault, IOServiceMatching(IO_SERVICE_NAME), &iterator);
     if (result != kIOReturnSuccess)
     {
+        pthread_mutex_unlock(&smcMutex);
         printf("Error: IOServiceGetMatchingServices() = %08x\n", result);
         return result;
     }
@@ -20,6 +44,7 @@ kern_return_t SMCOpen(void)
     IOObjectRelease(iterator);
     if (!device)
     {
+        pthread_mutex_unlock(&smcMutex);
         printf("Error: no SMC found\n");
         return kIOReturnNoDevice;
     }
@@ -28,30 +53,71 @@ kern_return_t SMCOpen(void)
     IOObjectRelease(device);
     if (result != kIOReturnSuccess)
     {
+        conn = 0;
+        pthread_mutex_unlock(&smcMutex);
         printf("Error: IOServiceOpen() = %08x\n", result);
         return result;
     }
+
+    smcOpenCount = 1;
+    pthread_mutex_unlock(&smcMutex);
 
     return kIOReturnSuccess;
 }
 
 kern_return_t SMCClose(void)
 {
-    return IOServiceClose(conn);
+    kern_return_t result = kIOReturnSuccess;
+
+    pthread_mutex_lock(&smcMutex);
+
+    if (smcOpenCount == 0)
+    {
+        // Closed more times than opened; nothing to do, and definitely do not
+        // call IOServiceClose on a stale handle.
+        pthread_mutex_unlock(&smcMutex);
+        return kIOReturnNotOpen;
+    }
+
+    if (--smcOpenCount == 0)
+    {
+        result = IOServiceClose(conn);
+        conn = 0;
+    }
+
+    pthread_mutex_unlock(&smcMutex);
+
+    return result;
 }
 
 
 kern_return_t SMCCall(int index, SMCKeyData *inputStructure, SMCKeyData *outputStructure)
 {
-    size_t   structureInputSize;
-    size_t   structureOutputSize;
+    size_t        structureInputSize;
+    size_t        structureOutputSize;
+    kern_return_t result;
 
     structureInputSize = sizeof(SMCKeyData);
     structureOutputSize = sizeof(SMCKeyData);
 
-    return IOConnectCallStructMethod(conn, index,
-                                     inputStructure, structureInputSize,
-                                     outputStructure, &structureOutputSize);
+    // Held across the call so `conn` cannot be closed underneath it. Each call
+    // carries the key it wants in inputStructure, so concurrent readers do not
+    // need to hold the lock across a whole read sequence -- per call is enough.
+    pthread_mutex_lock(&smcMutex);
+
+    if (smcOpenCount == 0 || conn == 0)
+    {
+        pthread_mutex_unlock(&smcMutex);
+        return kIOReturnNotOpen;
+    }
+
+    result = IOConnectCallStructMethod(conn, index,
+                                       inputStructure, structureInputSize,
+                                       outputStructure, &structureOutputSize);
+
+    pthread_mutex_unlock(&smcMutex);
+
+    return result;
 }
 
 kern_return_t SMCReadKey(SMCCode key, SMCKeyValue *val)

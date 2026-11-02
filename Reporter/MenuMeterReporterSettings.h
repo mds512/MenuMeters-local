@@ -37,8 +37,22 @@ extern NSString * const kMenuMeterReporterSettingsDidChangeNotification;
 @property (nonatomic, assign) double intervalSeconds;
 
 // Optional single extra request header, e.g. "Authorization" / "Bearer abc123".
+//
+// The name is an ordinary preference. The VALUE is a credential, so it is kept in
+// the login keychain rather than in NSUserDefaults, where it used to sit in
+// cleartext in ~/Library/Preferences and get swept into backups and prefs sync.
+// Any value left behind by an older build is migrated into the keychain and
+// deleted from the defaults on first launch.
+//
+// Note: the keychain item is owned by this app's code signature. Because these
+// builds are ad-hoc signed, a rebuild is a different identity, so macOS will ask
+// once per build whether MenuMeters may read the item. "Always Allow" is fine.
 @property (nonatomic, copy) NSString *authHeaderName;
 @property (nonatomic, copy) NSString *authHeaderValue;
+
+// YES when the keychain refused to store the value, so the UI can say so instead
+// of silently dropping the credential. Reset on the next successful write.
+@property (nonatomic, readonly) BOOL authHeaderValueStorageFailed;
 
 // Identifier for this machine, chosen by the user, sent as "device_id" in every
 // payload. Blank falls back to the hostname so the field is never empty on the
@@ -65,7 +79,13 @@ extern NSString * const kMenuMeterReporterSettingsDidChangeNotification;
 // nil unless urlString parses into an http/https URL.
 @property (nonatomic, readonly, nullable) NSURL *url;
 
-// YES when reporting is switched on AND a usable URL is set.
+// YES when url is a plain-http URL pointing somewhere other than the local
+// network. App Transport Security blocks those (see MenuMeters-Info.plist), so
+// the reporter checks this first and reports a readable reason rather than
+// letting the request fail with an opaque -1022.
+@property (nonatomic, readonly) BOOL urlIsBlockedInsecureHTTP;
+
+// YES when reporting is switched on AND a usable, sendable URL is set.
 @property (nonatomic, readonly) BOOL isConfigured;
 
 // This machine's real hostname, reported alongside the device ID.

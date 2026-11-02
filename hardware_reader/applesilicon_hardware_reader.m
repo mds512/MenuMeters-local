@@ -51,8 +51,21 @@ IOHIDFloat IOHIDEventGetFloatValue(IOHIDEventRef event, int32_t field);
 #define kIOHIDEventTypeTemperature  15
 #define kIOHIDEventTypePower        25
 
+#include <pthread.h>
+
 static dispatch_once_t once=0;
 static IOHIDEventSystemClientRef eventSystem;
+
+// Both readers below work by setting a matching dictionary on the shared event
+// system client and then asking that same client which services matched. That
+// pair has to be atomic: the metrics reporter reads sensors on its work queue
+// while the CPU menu extra reads them on the main thread, and interleaved, one
+// thread's matching dictionary is in place when the other calls CopyServices --
+// so a sensor read quietly returns a *different* sensor's temperature, or none.
+//
+// One mutex over "set matching, then collect the result" fixes it. The client
+// itself is created once and never torn down, so it needs no further guarding.
+static pthread_mutex_t eventSystemMutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void initEventSystem(void){
     dispatch_once(&once,^{
@@ -66,13 +79,13 @@ NSArray*AppleSiliconTemperatureSensorNames(void)
     
     NSDictionary*thermalSensors=@{@"PrimaryUsagePage":@(0xff00),@"PrimaryUsage":@(5)};
 
-   
+    NSMutableArray*array=[NSMutableArray array];
+
+    pthread_mutex_lock(&eventSystemMutex);
     // ... this is the same as using kCFAllocatorDefault or the return value from CFAllocatorGetDefault()
     IOHIDEventSystemClientSetMatching(eventSystem, (__bridge CFDictionaryRef)thermalSensors);
     NSArray* matchingsrvs = CFBridgingRelease(IOHIDEventSystemClientCopyServices(eventSystem)); // matchingsrvs = matching services
 
-
-    NSMutableArray*array=[NSMutableArray array];
     for (NSObject* scx in matchingsrvs) {
         IOHIDServiceClientRef sc = (__bridge IOHIDServiceClientRef)scx;
         NSString* name = CFBridgingRelease(IOHIDServiceClientCopyProperty(sc, CFSTR("Product"))); // here we use ...CopyProperty
@@ -80,10 +93,10 @@ NSArray*AppleSiliconTemperatureSensorNames(void)
             [array addObject:name];
         }
     }
-    
-    
+    pthread_mutex_unlock(&eventSystemMutex);
+
     return array;
-    
+
 }
 
 float AppleSiliconTemperatureForName(NSString *productName) {
@@ -92,10 +105,12 @@ float AppleSiliconTemperatureForName(NSString *productName) {
 	NSDictionary *thermalSensors = @{@"PrimaryUsagePage": @(0xff00),
 									  @"PrimaryUsage": @(5),
                                       @"Product":productName};
+    float temp=-273.15F;
+
+    pthread_mutex_lock(&eventSystemMutex);
 	// ... this is the same as using kCFAllocatorDefault or the return value from CFAllocatorGetDefault()
 	IOHIDEventSystemClientSetMatching(eventSystem, (__bridge CFDictionaryRef)thermalSensors);
     NSArray* matchingsrvs = CFBridgingRelease(IOHIDEventSystemClientCopyServices(eventSystem)); // matchingsrvs = matching services
-    float temp=-273.15F;
     if(matchingsrvs){
         if([matchingsrvs count]>0){
             IOHIDServiceClientRef sc = (__bridge IOHIDServiceClientRef)matchingsrvs[0];
@@ -106,6 +121,7 @@ float AppleSiliconTemperatureForName(NSString *productName) {
             }
         }
     }
+    pthread_mutex_unlock(&eventSystemMutex);
 
 	return temp;
 }

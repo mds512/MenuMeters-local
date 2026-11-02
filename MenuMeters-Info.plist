@@ -42,10 +42,16 @@
 	<dict>
 		<!-- The only outbound request this app makes is to the reporting URL the
 		     user types in themselves. That is very often a plain-http endpoint on
-		     the local network (a home server, an InfluxDB box, a Pi), so ATS has
-		     to allow it. There is no other network code in the app. -->
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
+		     the local network (a home server, an InfluxDB box, a Pi), which is
+		     what NSAllowsLocalNetworking permits: loopback, *.local, unqualified
+		     hostnames, and the private/link-local IP ranges.
+
+		     NSAllowsArbitraryLoads is deliberately NOT set. It used to be, which
+		     disabled ATS for every host and meant the optional auth header could
+		     be POSTed in cleartext to a public-internet endpoint with no warning.
+		     A reporting URL outside the local network must now be https://.
+		     MenuMeterReporter rejects such a URL up front with an explanation,
+		     rather than letting it fail as an opaque ATS error. -->
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
