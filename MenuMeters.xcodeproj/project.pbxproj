@@ -71,6 +71,7 @@
 		33B440112594675E00CBBEDF /* com.ragingmenace.MenuMeters.plist in Resources */ = {isa = PBXBuildFile; fileRef = 33B440102594675E00CBBEDF /* com.ragingmenace.MenuMeters.plist */; };
 		33F0921923673DAC00953CAB /* releases.html in Resources */ = {isa = PBXBuildFile; fileRef = 33F0921823673DAC00953CAB /* releases.html */; };
 		AA000000000000000000000B /* MenuMeterReporterSettings.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000002 /* MenuMeterReporterSettings.m */; };
+		AA0000000000000000000017 /* MenuMeterAlerts.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000016 /* MenuMeterAlerts.m */; };
 		AA000000000000000000000D /* MenuMeterReporter.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000004 /* MenuMeterReporter.m */; };
 		AA000000000000000000000F /* MenuMeterReporterPrefsViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000006 /* MenuMeterReporterPrefsViewController.m */; };
 		AA0000000000000000000011 /* MenuMeterReporterSetupWindowController.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* MenuMeterReporterSetupWindowController.m */; };
@@ -222,6 +223,8 @@
 		F75EBE2F235B6F3600876CF7 /* smc_reader.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = smc_reader.m; sourceTree = "<group>"; };
 		AA0000000000000000000001 /* MenuMeterReporterSettings.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "MenuMeterReporterSettings.h"; sourceTree = "<group>"; };
 		AA0000000000000000000002 /* MenuMeterReporterSettings.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "MenuMeterReporterSettings.m"; sourceTree = "<group>"; };
+		AA0000000000000000000015 /* MenuMeterAlerts.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "MenuMeterAlerts.h"; sourceTree = "<group>"; };
+		AA0000000000000000000016 /* MenuMeterAlerts.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "MenuMeterAlerts.m"; sourceTree = "<group>"; };
 		AA0000000000000000000003 /* MenuMeterReporter.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "MenuMeterReporter.h"; sourceTree = "<group>"; };
 		AA0000000000000000000004 /* MenuMeterReporter.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "MenuMeterReporter.m"; sourceTree = "<group>"; };
 		AA0000000000000000000005 /* MenuMeterReporterPrefsViewController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "MenuMeterReporterPrefsViewController.h"; sourceTree = "<group>"; };
@@ -534,6 +537,8 @@
 				AA0000000000000000000006 /* MenuMeterReporterPrefsViewController.m */,
 				AA0000000000000000000007 /* MenuMeterReporterSetupWindowController.h */,
 				AA0000000000000000000008 /* MenuMeterReporterSetupWindowController.m */,
+				AA0000000000000000000015 /* MenuMeterAlerts.h */,
+				AA0000000000000000000016 /* MenuMeterAlerts.m */,
 			);
 			path = Reporter;
 			sourceTree = "<group>";
@@ -663,6 +668,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AA000000000000000000000B /* MenuMeterReporterSettings.m in Sources */,
+				AA0000000000000000000017 /* MenuMeterAlerts.m in Sources */,
 				AA000000000000000000000D /* MenuMeterReporter.m in Sources */,
 				AA000000000000000000000F /* MenuMeterReporterPrefsViewController.m in Sources */,
 				AA0000000000000000000011 /* MenuMeterReporterSetupWindowController.m in Sources */,
@@ -801,6 +807,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = "MenuMeters-Info.plist";
+				OTHER_LDFLAGS = "-weak_framework UserNotifications";
 				INFOPLIST_PREFIX_HEADER = ./InfoPlistPreprocessor.h;
 				INFOPLIST_PREPROCESS = YES;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @loader_path/../Frameworks";
@@ -868,6 +875,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = "MenuMeters-Info.plist";
+				OTHER_LDFLAGS = "-weak_framework UserNotifications";
 				INFOPLIST_PREFIX_HEADER = ./InfoPlistPreprocessor.h;
 				INFOPLIST_PREPROCESS = YES;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @loader_path/../Frameworks";

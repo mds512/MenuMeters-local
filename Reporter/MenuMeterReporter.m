@@ -5,6 +5,7 @@
 //
 
 #import "MenuMeterReporter.h"
+#import "MenuMeterAlerts.h"
 #import "MenuMeterReporterSettings.h"
 #import "MenuMeterReporterSetupWindowController.h"
 
@@ -112,22 +113,31 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
     }
 
     MenuMeterReporterSettings *settings = [MenuMeterReporterSettings sharedSettings];
-    if (!settings.isConfigured) {
-        // Nothing configured: stay completely off the network.
+    MenuMeterAlerts *alerts = [MenuMeterAlerts sharedAlerts];
+
+    // One reason for not being configured is a URL that ATS will not allow.
+    // Report it, otherwise reporting looks switched on and simply never sends,
+    // with nothing anywhere saying why. Checked before the sampling decision,
+    // because alerts can legitimately keep the timer running with no usable URL.
+    if (settings.enabled && settings.urlIsBlockedInsecureHTTP) {
+        [self finishWithSuccess:NO
+                        message:[NSString stringWithFormat:
+                                 NSLocalizedString(@"Not sending: %@ is a plain http:// address outside the local network. Use https://, or an address on your own network.",
+                                                   @"reporter status"),
+                                 settings.url.host]
+                     completion:nil];
+    }
+
+    // Alerts need the same samples, so the timer also runs for them alone --
+    // with no reporting URL and nothing leaving the machine. Sending stays gated
+    // on isConfigured in -timerFired:.
+    BOOL alertsEnabled = alerts.isEnabled;
+    if (alertsEnabled) [alerts prepare];
+
+    if (!settings.isConfigured && !alertsEnabled) {
+        // Nothing to do: no reporting, no alerts. Stay completely off the network.
         [timer invalidate];
         timer = nil;
-
-        // One reason for not being configured is a URL that ATS will not allow.
-        // Report it, otherwise reporting looks switched on and simply never
-        // sends, with nothing anywhere saying why.
-        if (settings.enabled && settings.urlIsBlockedInsecureHTTP) {
-            [self finishWithSuccess:NO
-                            message:[NSString stringWithFormat:
-                                     NSLocalizedString(@"Not sending: %@ is a plain http:// address outside the local network. Use https://, or an address on your own network.",
-                                                       @"reporter status"),
-                                     settings.url.host]
-                         completion:nil];
-        }
         return;
     }
 
@@ -169,10 +179,44 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
 - (void)timerFired:(NSTimer *)firedTimer {
     dispatch_async(workQueue, ^{
         MenuMeterReporterSettings *settings = [MenuMeterReporterSettings sharedSettings];
-        if (!settings.isConfigured) return;
-        NSDictionary *payload = [self collectSnapshot];
-        [self postPayload:payload completion:nil];
+        MenuMeterAlerts *alerts = [MenuMeterAlerts sharedAlerts];
+
+        BOOL sending = settings.isConfigured;
+        NSSet *alertSections = alerts.requiredSections;
+        if (!sending && alertSections.count == 0) return;
+
+        // Collected once per tick: the disk and network sections carry deltas
+        // against the previous sample, so a second call would halve the interval
+        // they think has passed.
+        //
+        // Sections an alert needs are collected even when they are switched off
+        // for reporting -- but they are then stripped before the POST, so
+        // arming an alert never widens what gets sent.
+        NSDictionary *full = [self collectSnapshotWithExtraSections:alertSections];
+
+        if (alertSections.count > 0) [alerts evaluateSnapshot:full];
+
+        if (sending) {
+            [self postPayload:[self payloadForSending:full] completion:nil];
+        }
     });
+}
+
+// Drops any section the user has not switched on for reporting. Only has
+// anything to do when an alert pulled in a section reporting does not want.
+- (NSDictionary *)payloadForSending:(NSDictionary *)snapshot {
+
+    MenuMeterReporterSettings *settings = [MenuMeterReporterSettings sharedSettings];
+    NSMutableDictionary *payload = [snapshot mutableCopy];
+
+    if (!settings.includeSystem)      [payload removeObjectForKey:@"system"];
+    if (!settings.includeCPU)         [payload removeObjectForKey:kMenuMeterAlertSectionCPU];
+    if (!settings.includeTemperature) [payload removeObjectForKey:kMenuMeterAlertSectionTemperature];
+    if (!settings.includeMemory)      [payload removeObjectForKey:@"memory"];
+    if (!settings.includeDisk)        [payload removeObjectForKey:kMenuMeterAlertSectionDisk];
+    if (!settings.includeNetwork)     [payload removeObjectForKey:kMenuMeterAlertSectionNetwork];
+
+    return payload;
 }
 
 #pragma mark - Sending
@@ -309,6 +353,13 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
 #pragma mark - Collection
 
 - (NSDictionary *)collectSnapshot {
+    return [self collectSnapshotWithExtraSections:nil];
+}
+
+// `extra` names sections to collect even when they are switched off for
+// reporting, so an armed alert can watch a metric the user does not want sent.
+// Passing nil gives exactly the old behaviour.
+- (NSDictionary *)collectSnapshotWithExtraSections:(NSSet<NSString *> *)extra {
     MenuMeterReporterSettings *settings = [MenuMeterReporterSettings sharedSettings];
 
     NSDate *now = [NSDate date];
@@ -323,15 +374,22 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
     payload[@"timestamp_unix"] = @((long long)[now timeIntervalSince1970]);
     payload[@"interval_seconds"] = @(elapsed);
 
-    if (settings.includeSystem)      payload[@"system"] = [self systemSection];
-    if (settings.includeCPU)         payload[@"cpu"] = [self cpuSection];
-    if (settings.includeTemperature) {
-        NSDictionary *temperature = [self temperatureSection];
-        if (temperature) payload[@"temperature"] = temperature;
+    if (settings.includeSystem) payload[@"system"] = [self systemSection];
+    if (settings.includeMemory) payload[@"memory"] = [self memorySection];
+
+    if (settings.includeCPU || [extra containsObject:kMenuMeterAlertSectionCPU]) {
+        payload[kMenuMeterAlertSectionCPU] = [self cpuSection];
     }
-    if (settings.includeMemory)      payload[@"memory"] = [self memorySection];
-    if (settings.includeDisk)        payload[@"disk"] = [self diskSectionOverInterval:elapsed];
-    if (settings.includeNetwork)     payload[@"network"] = [self networkSectionOverInterval:elapsed];
+    if (settings.includeTemperature || [extra containsObject:kMenuMeterAlertSectionTemperature]) {
+        NSDictionary *temperature = [self temperatureSection];
+        if (temperature) payload[kMenuMeterAlertSectionTemperature] = temperature;
+    }
+    if (settings.includeDisk || [extra containsObject:kMenuMeterAlertSectionDisk]) {
+        payload[kMenuMeterAlertSectionDisk] = [self diskSectionOverInterval:elapsed];
+    }
+    if (settings.includeNetwork || [extra containsObject:kMenuMeterAlertSectionNetwork]) {
+        payload[kMenuMeterAlertSectionNetwork] = [self networkSectionOverInterval:elapsed];
+    }
 
     lastSampleDate = now;
     return payload;
