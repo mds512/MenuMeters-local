@@ -6,11 +6,20 @@ name: Build MenuMeters
 #
 # No secrets, no certificates, no Apple Developer account required.
 
+# Deliberately no `pull_request:` trigger. A bare pull_request: builds whatever
+# code is in any PR, and this is a public repo, so that is an invitation for a
+# stranger's build phase to run on a macOS runner and for the resulting artifact
+# to sit on this repo's Actions page looking official. Nothing of value is lost:
+# there are no outside contributors, and a PR worth testing can be checked out
+# locally or built with workflow_dispatch.
+#
+# Repo settings back this up -- Actions > fork-pr-contributor-approval is set to
+# all_external_contributors, so no outside workflow runs unattended either way.
+# Note that forking itself cannot be disabled on a user-owned public repo.
 on:
   push:
     branches: ['**']
     tags: ['v*']
-  pull_request:
   workflow_dispatch:
 
 # Read-only by default. Only the release job below raises this to write, and it
