@@ -116,6 +116,18 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
         // Nothing configured: stay completely off the network.
         [timer invalidate];
         timer = nil;
+
+        // One reason for not being configured is a URL that ATS will not allow.
+        // Report it, otherwise reporting looks switched on and simply never
+        // sends, with nothing anywhere saying why.
+        if (settings.enabled && settings.urlIsBlockedInsecureHTTP) {
+            [self finishWithSuccess:NO
+                            message:[NSString stringWithFormat:
+                                     NSLocalizedString(@"Not sending: %@ is a plain http:// address outside the local network. Use https://, or an address on your own network.",
+                                                       @"reporter status"),
+                                     settings.url.host]
+                         completion:nil];
+        }
         return;
     }
 
