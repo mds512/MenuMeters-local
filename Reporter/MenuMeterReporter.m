@@ -249,10 +249,12 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
             // 10% tolerance from pushing a due POST to the following tick.
             NSTimeInterval reportInterval = settings.intervalSeconds;
             NSDate *now = [NSDate date];
-            BOOL due = (lastPostDate == nil) ||
-                       ([now timeIntervalSinceDate:lastPostDate] >= reportInterval * 0.9);
+            // self-> rather than a bare ivar: this is inside a block, and the
+            // project builds with -Wimplicit-retain-self as an error.
+            BOOL due = (self->lastPostDate == nil) ||
+                       ([now timeIntervalSinceDate:self->lastPostDate] >= reportInterval * 0.9);
             if (due) {
-                lastPostDate = now;
+                self->lastPostDate = now;
                 [self postPayload:[self payloadForSending:full] completion:nil];
             }
         }
