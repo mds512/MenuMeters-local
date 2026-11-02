@@ -92,6 +92,12 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
                                              selector:@selector(settingsChanged:)
                                                  name:kMenuMeterReporterSettingsDidChangeNotification
                                                object:nil];
+    // Alerts keep the sampling timer running on their own, so a change there
+    // has to reach -start too.
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(settingsChanged:)
+                                                 name:kMenuMeterAlertsDidChangeNotification
+                                               object:nil];
     return self;
 }
 
@@ -131,7 +137,7 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
     // Alerts need the same samples, so the timer also runs for them alone --
     // with no reporting URL and nothing leaving the machine. Sending stays gated
     // on isConfigured in -timerFired:.
-    BOOL alertsEnabled = alerts.isEnabled;
+    BOOL alertsEnabled = alerts.isActive;
     if (alertsEnabled) [alerts prepare];
 
     if (!settings.isConfigured && !alertsEnabled) {

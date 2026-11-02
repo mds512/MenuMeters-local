@@ -9,6 +9,8 @@
 #import <AppKit/AppKit.h>
 #import <UserNotifications/UserNotifications.h>
 
+NSString * const kMenuMeterAlertsDidChangeNotification = @"MenuMeterAlertsDidChange";
+
 NSString * const kMenuMeterAlertSectionCPU         = @"cpu";
 NSString * const kMenuMeterAlertSectionTemperature = @"temperature";
 NSString * const kMenuMeterAlertSectionDisk        = @"disk";
@@ -23,16 +25,6 @@ static NSString * const kAlertDiskPref            = @"AlertDiskPercent";
 static NSString * const kAlertNetworkPref         = @"AlertNetworkBytesPerSec";
 static NSString * const kAlertCooldownPref        = @"AlertCooldownSeconds";
 static NSString * const kAlertConsecutivePref     = @"AlertConsecutiveSamples";
-
-// A breach has to survive this many samples in a row before it notifies, so a
-// one-off spike from Spotlight or a backup does not fire anything.
-static const NSInteger kAlertConsecutiveDefault = 2;
-static const NSInteger kAlertConsecutiveMax     = 20;
-
-// Minimum gap between two notifications for the same metric while it stays over
-// the line. Floored well above zero so a misconfigured value cannot spam.
-static const NSTimeInterval kAlertCooldownDefault = 600.0;   // 10 minutes
-static const NSTimeInterval kAlertCooldownMin     = 60.0;
 
 @interface MenuMeterAlerts ()
 // Written from a notification-authorization callback on an arbitrary queue and
@@ -66,57 +58,108 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
 
 #pragma mark - Settings
 
-- (double)thresholdForKey:(NSString *)key {
+// Every setting is a plain preference, so the Notifs tab and `defaults write`
+// are interchangeable. Writes post a change notification because the reporter's
+// sampling timer only runs while isActive, and toggling that has to restart it.
+
+- (void)notifyChanged {
+    [[NSNotificationCenter defaultCenter] postNotificationName:kMenuMeterAlertsDidChangeNotification
+                                                        object:self];
+}
+
+- (double)limitForKey:(NSString *)key {
     double value = [[NSUserDefaults standardUserDefaults] doubleForKey:key];
     return (value > 0) ? value : 0;   // 0 or negative means "not watched"
 }
 
-- (NSTimeInterval)cooldown {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    if (![defaults objectForKey:kAlertCooldownPref]) return kAlertCooldownDefault;
-    NSTimeInterval value = [defaults doubleForKey:kAlertCooldownPref];
-    return (value < kAlertCooldownMin) ? kAlertCooldownMin : value;
+- (void)setLimit:(double)value forKey:(NSString *)key {
+    double clean = (value > 0) ? value : 0;
+    if (fabs([self limitForKey:key] - clean) < 0.0001) return;
+    [[NSUserDefaults standardUserDefaults] setDouble:clean forKey:key];
+    [self notifyChanged];
 }
 
-- (NSInteger)requiredConsecutive {
+- (BOOL)enabled { return [[NSUserDefaults standardUserDefaults] boolForKey:kAlertsEnabledPref]; }
+- (void)setEnabled:(BOOL)value {
+    if (self.enabled == value) return;
+    [[NSUserDefaults standardUserDefaults] setBool:value forKey:kAlertsEnabledPref];
+    [self notifyChanged];
+}
+
+- (double)temperatureLimitC { return [self limitForKey:kAlertTemperaturePref]; }
+- (void)setTemperatureLimitC:(double)v { [self setLimit:v forKey:kAlertTemperaturePref]; }
+
+- (double)cpuLimitPercent { return [self limitForKey:kAlertCPUPref]; }
+- (void)setCpuLimitPercent:(double)v { [self setLimit:v forKey:kAlertCPUPref]; }
+
+- (double)diskLimitPercent { return [self limitForKey:kAlertDiskPref]; }
+- (void)setDiskLimitPercent:(double)v { [self setLimit:v forKey:kAlertDiskPref]; }
+
+- (double)networkLimitBytesPerSecond { return [self limitForKey:kAlertNetworkPref]; }
+- (void)setNetworkLimitBytesPerSecond:(double)v { [self setLimit:v forKey:kAlertNetworkPref]; }
+
+- (NSTimeInterval)cooldownSeconds {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    if (![defaults objectForKey:kAlertConsecutivePref]) return kAlertConsecutiveDefault;
+    if (![defaults objectForKey:kAlertCooldownPref]) return kMenuMeterAlertCooldownDefault;
+    NSTimeInterval value = [defaults doubleForKey:kAlertCooldownPref];
+    return (value < kMenuMeterAlertCooldownMin) ? kMenuMeterAlertCooldownMin : value;
+}
+
+- (void)setCooldownSeconds:(NSTimeInterval)value {
+    NSTimeInterval clamped = (value < kMenuMeterAlertCooldownMin) ? kMenuMeterAlertCooldownMin : value;
+    if (fabs(self.cooldownSeconds - clamped) < 0.001) return;
+    [[NSUserDefaults standardUserDefaults] setDouble:clamped forKey:kAlertCooldownPref];
+    [self notifyChanged];
+}
+
+- (NSInteger)consecutiveSamples {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if (![defaults objectForKey:kAlertConsecutivePref]) return kMenuMeterAlertConsecutiveDefault;
     NSInteger value = [defaults integerForKey:kAlertConsecutivePref];
-    if (value < 1) return 1;
-    if (value > kAlertConsecutiveMax) return kAlertConsecutiveMax;
+    if (value < kMenuMeterAlertConsecutiveMin) return kMenuMeterAlertConsecutiveMin;
+    if (value > kMenuMeterAlertConsecutiveMax) return kMenuMeterAlertConsecutiveMax;
     return value;
+}
+
+- (void)setConsecutiveSamples:(NSInteger)value {
+    NSInteger clamped = value;
+    if (clamped < kMenuMeterAlertConsecutiveMin) clamped = kMenuMeterAlertConsecutiveMin;
+    if (clamped > kMenuMeterAlertConsecutiveMax) clamped = kMenuMeterAlertConsecutiveMax;
+    if (self.consecutiveSamples == clamped) return;
+    [[NSUserDefaults standardUserDefaults] setInteger:clamped forKey:kAlertConsecutivePref];
+    [self notifyChanged];
 }
 
 - (NSSet<NSString *> *)requiredSections {
     NSMutableSet *needed = [NSMutableSet set];
-    if (![[NSUserDefaults standardUserDefaults] boolForKey:kAlertsEnabledPref]) return needed;
-    if ([self thresholdForKey:kAlertTemperaturePref] > 0) [needed addObject:kMenuMeterAlertSectionTemperature];
-    if ([self thresholdForKey:kAlertCPUPref] > 0)         [needed addObject:kMenuMeterAlertSectionCPU];
-    if ([self thresholdForKey:kAlertDiskPref] > 0)        [needed addObject:kMenuMeterAlertSectionDisk];
-    if ([self thresholdForKey:kAlertNetworkPref] > 0)     [needed addObject:kMenuMeterAlertSectionNetwork];
+    if (!self.enabled) return needed;
+    if (self.temperatureLimitC > 0)          [needed addObject:kMenuMeterAlertSectionTemperature];
+    if (self.cpuLimitPercent > 0)            [needed addObject:kMenuMeterAlertSectionCPU];
+    if (self.diskLimitPercent > 0)           [needed addObject:kMenuMeterAlertSectionDisk];
+    if (self.networkLimitBytesPerSecond > 0) [needed addObject:kMenuMeterAlertSectionNetwork];
     return needed;
 }
 
-- (BOOL)isEnabled {
+- (BOOL)isActive {
     return self.requiredSections.count > 0;
 }
 
 - (NSString *)armedSummary {
-    if (![[NSUserDefaults standardUserDefaults] boolForKey:kAlertsEnabledPref]) {
-        return NSLocalizedString(@"Alerts are switched off (AlertsEnabled is false).", @"alert");
+    if (!self.enabled) {
+        return NSLocalizedString(@"Alerts are switched off.", @"alert");
     }
     NSMutableArray *parts = [NSMutableArray array];
     double value = 0;
-    if ((value = [self thresholdForKey:kAlertTemperaturePref]) > 0) {
+    if ((value = self.temperatureLimitC) > 0) {
         [parts addObject:[NSString stringWithFormat:NSLocalizedString(@"temperature above %.0f °C", @"alert"), value]];
     }
-    if ((value = [self thresholdForKey:kAlertCPUPref]) > 0) {
+    if ((value = self.cpuLimitPercent) > 0) {
         [parts addObject:[NSString stringWithFormat:NSLocalizedString(@"CPU above %.0f%%", @"alert"), value]];
     }
-    if ((value = [self thresholdForKey:kAlertDiskPref]) > 0) {
+    if ((value = self.diskLimitPercent) > 0) {
         [parts addObject:[NSString stringWithFormat:NSLocalizedString(@"disk above %.0f%% full", @"alert"), value]];
     }
-    if ((value = [self thresholdForKey:kAlertNetworkPref]) > 0) {
+    if ((value = self.networkLimitBytesPerSecond) > 0) {
         [parts addObject:[NSString stringWithFormat:NSLocalizedString(@"network above %@/s", @"alert"),
                           [self humanBytes:value]]];
     }
@@ -124,7 +167,7 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
         return NSLocalizedString(@"Alerts are on, but no threshold is set, so nothing is watched.", @"alert");
     }
     return [NSString stringWithFormat:NSLocalizedString(@"Watching: %@. Re-notifies at most every %.0f min, after %ld samples in a row.", @"alert"),
-            [parts componentsJoinedByString:@", "], [self cooldown] / 60.0, (long)[self requiredConsecutive]];
+            [parts componentsJoinedByString:@", "], self.cooldownSeconds / 60.0, (long)self.consecutiveSamples];
 }
 
 - (void)sendTestNotificationWithCompletion:(void (^)(BOOL, NSString *))completion {
@@ -149,7 +192,7 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
     double limit = 0;
 
     // --- Temperature ---
-    limit = [self thresholdForKey:kAlertTemperaturePref];
+    limit = self.temperatureLimitC;
     if (limit > 0) {
         NSNumber *celsius = snapshot[kMenuMeterAlertSectionTemperature][@"celsius"];
         [self considerMetric:@"temperature"
@@ -169,7 +212,7 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
     }
 
     // --- CPU ---
-    limit = [self thresholdForKey:kAlertCPUPref];
+    limit = self.cpuLimitPercent;
     if (limit > 0) {
         NSNumber *percent = snapshot[kMenuMeterAlertSectionCPU][@"total_percent"];
         [self considerMetric:@"cpu"
@@ -186,7 +229,7 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
     }
 
     // --- Disk: the fullest mounted volume ---
-    limit = [self thresholdForKey:kAlertDiskPref];
+    limit = self.diskLimitPercent;
     if (limit > 0) {
         NSString *fullestName = nil;
         double fullestPercent = -1;
@@ -213,7 +256,7 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
     }
 
     // --- Network: whichever direction is busier ---
-    limit = [self thresholdForKey:kAlertNetworkPref];
+    limit = self.networkLimitBytesPerSecond;
     if (limit > 0) {
         NSDictionary *totals = snapshot[kMenuMeterAlertSectionNetwork][@"totals"];
         NSNumber *in = totals[@"bytes_in_per_sec"];
@@ -263,11 +306,11 @@ static const NSTimeInterval kAlertCooldownMin     = 60.0;
 
     NSInteger streak = streaks[key].integerValue + 1;
     streaks[key] = @(streak);
-    if (streak < [self requiredConsecutive]) return;
+    if (streak < self.consecutiveSamples) return;
 
     NSDate *previous = lastNotified[key];
     NSDate *now = [NSDate date];
-    if (previous && [now timeIntervalSinceDate:previous] < [self cooldown]) return;
+    if (previous && [now timeIntervalSinceDate:previous] < self.cooldownSeconds) return;
 
     lastNotified[key] = now;
     [self deliverTitle:title body:body];
