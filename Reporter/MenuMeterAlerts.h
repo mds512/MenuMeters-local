@@ -40,7 +40,8 @@ extern NSString * const kMenuMeterAlertSectionNetwork;
 @property (nonatomic, readonly) NSSet<NSString *> *requiredSections;
 
 // How a notification was last delivered, for logging and for the Phase 2 UI.
-@property (nonatomic, readonly, copy) NSString *deliveryRouteDescription;
+// Atomic: set on whichever queue delivery finished on, read from the UI.
+@property (atomic, readonly, copy) NSString *deliveryRouteDescription;
 
 // Idempotent; safe to call repeatedly. Main thread.
 - (void)prepare;
