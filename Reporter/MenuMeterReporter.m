@@ -52,6 +52,11 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
 
     NSDate              *lastSampleDate;
     NSTimer             *timer;
+    // Coalesces the burst of -start calls a settings edit produces.
+    NSTimer             *resampleTimer;
+    // When the last POST went out, so a fast alert cadence does not drag
+    // reporting along with it.
+    NSDate              *lastPostDate;
     NSURLSession        *session;
     dispatch_queue_t     workQueue;
 
@@ -147,30 +152,63 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
         return;
     }
 
-    // Saving settings fires one change notification per field, so this method is
-    // called in bursts. Leave an already-correct timer alone, or every keystroke
-    // in the settings pane would trigger another POST.
-    NSTimeInterval interval = settings.intervalSeconds;
-    BOOL wasRunning = (timer != nil);
-    if (wasRunning && fabs(timer.timeInterval - interval) < 0.001) {
-        return;
+    // Reporting and alerts have their own intervals, but there can only be one
+    // sampler: the disk and network sections report deltas against the previous
+    // sample, so a second timer calling in would corrupt both. So the single
+    // timer runs at whichever cadence is shorter, and -timerFired: decides
+    // separately whether a POST is due. Checking alerts every 15s therefore does
+    // not turn into POSTing every 15s.
+    NSTimeInterval interval = 0;
+    if (settings.isConfigured) interval = settings.intervalSeconds;
+    if (alertsEnabled) {
+        NSTimeInterval alertInterval = alerts.checkIntervalSeconds;
+        interval = (interval > 0) ? MIN(interval, alertInterval) : alertInterval;
     }
+    if (interval <= 0) interval = settings.intervalSeconds;   // not reachable; cheap guard
 
-    [timer invalidate];
-    timer = [NSTimer scheduledTimerWithTimeInterval:interval
-                                             target:self
-                                           selector:@selector(timerFired:)
-                                           userInfo:nil
-                                            repeats:YES];
-    // Lets the OS coalesce our wakeups with others, which matters on battery.
-    timer.tolerance = interval * 0.1;
+    // Saving settings fires one change notification per field, so this method is
+    // called in bursts. Leave an already-correct timer alone rather than
+    // restarting it on every keystroke.
+    BOOL wasRunning = (timer != nil);
+    if (!wasRunning || fabs(timer.timeInterval - interval) > 0.001) {
+        [timer invalidate];
+        timer = [NSTimer scheduledTimerWithTimeInterval:interval
+                                                 target:self
+                                               selector:@selector(timerFired:)
+                                               userInfo:nil
+                                                repeats:YES];
+        // Lets the OS coalesce our wakeups with others, which matters on battery.
+        timer.tolerance = interval * 0.1;
+    }
 
     if (!wasRunning) {
-        // Send one sample straight away when reporting is first switched on, so
-        // the user finds out immediately whether their endpoint works. Changing
-        // the interval later only reschedules; it does not re-send.
+        // Sample straight away when this first starts, so a bad endpoint or a
+        // limit that is already breached shows up immediately.
         [self timerFired:nil];
+    } else {
+        // Already running, and something changed. Re-sample soon so an edited
+        // limit is judged now instead of up to a full interval later.
+        [self scheduleSettingsResample];
     }
+}
+
+// start is called once per changed field, so coalesce the burst into one
+// re-sample rather than one per keystroke.
+- (void)scheduleSettingsResample {
+    [resampleTimer invalidate];
+    resampleTimer = [NSTimer scheduledTimerWithTimeInterval:0.6
+                                                     target:self
+                                                   selector:@selector(settingsResampleFired:)
+                                                   userInfo:nil
+                                                    repeats:NO];
+}
+
+- (void)settingsResampleFired:(NSTimer *)firedTimer {
+    resampleTimer = nil;
+    // A streak counted against the old limit means nothing. Queued before the
+    // sample below, and workQueue is serial, so the order holds.
+    dispatch_async(workQueue, ^{ [[MenuMeterAlerts sharedAlerts] resetStreaks]; });
+    [self timerFired:nil];
 }
 
 - (void)stop {
@@ -180,6 +218,8 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
     }
     [timer invalidate];
     timer = nil;
+    [resampleTimer invalidate];
+    resampleTimer = nil;
 }
 
 - (void)timerFired:(NSTimer *)firedTimer {
@@ -203,7 +243,18 @@ static const NSTimeInterval kMenuMeterReporterRequestTimeout = 15.0;
         if (alertSections.count > 0) [alerts evaluateSnapshot:full];
 
         if (sending) {
-            [self postPayload:[self payloadForSending:full] completion:nil];
+            // The timer may be ticking faster than the reporting interval
+            // because alerts asked for it. Only POST when one reporting
+            // interval has actually elapsed. The 0.9 slack stops the timer's
+            // 10% tolerance from pushing a due POST to the following tick.
+            NSTimeInterval reportInterval = settings.intervalSeconds;
+            NSDate *now = [NSDate date];
+            BOOL due = (lastPostDate == nil) ||
+                       ([now timeIntervalSinceDate:lastPostDate] >= reportInterval * 0.9);
+            if (due) {
+                lastPostDate = now;
+                [self postPayload:[self payloadForSending:full] completion:nil];
+            }
         }
     });
 }

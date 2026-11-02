@@ -23,6 +23,7 @@ static NSString * const kAlertTemperaturePref     = @"AlertTemperatureC";
 static NSString * const kAlertCPUPref             = @"AlertCPUPercent";
 static NSString * const kAlertDiskPref            = @"AlertDiskPercent";
 static NSString * const kAlertNetworkPref         = @"AlertNetworkBytesPerSec";
+static NSString * const kAlertIntervalPref        = @"AlertIntervalSeconds";
 static NSString * const kAlertCooldownPref        = @"AlertCooldownSeconds";
 static NSString * const kAlertConsecutivePref     = @"AlertConsecutiveSamples";
 
@@ -98,6 +99,26 @@ static NSString * const kAlertConsecutivePref     = @"AlertConsecutiveSamples";
 - (double)networkLimitBytesPerSecond { return [self limitForKey:kAlertNetworkPref]; }
 - (void)setNetworkLimitBytesPerSecond:(double)v { [self setLimit:v forKey:kAlertNetworkPref]; }
 
+- (NSTimeInterval)checkIntervalSeconds {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if (![defaults objectForKey:kAlertIntervalPref]) return kMenuMeterAlertIntervalDefault;
+    NSTimeInterval value = [defaults doubleForKey:kAlertIntervalPref];
+    // Clamped to the bound, not reset to the default: a too-small value here
+    // should mean "as fast as allowed", which is almost certainly the intent.
+    if (value < kMenuMeterAlertIntervalMin) return kMenuMeterAlertIntervalMin;
+    if (value > kMenuMeterAlertIntervalMax) return kMenuMeterAlertIntervalMax;
+    return value;
+}
+
+- (void)setCheckIntervalSeconds:(NSTimeInterval)value {
+    NSTimeInterval clamped = value;
+    if (clamped < kMenuMeterAlertIntervalMin) clamped = kMenuMeterAlertIntervalMin;
+    if (clamped > kMenuMeterAlertIntervalMax) clamped = kMenuMeterAlertIntervalMax;
+    if (fabs(self.checkIntervalSeconds - clamped) < 0.001) return;
+    [[NSUserDefaults standardUserDefaults] setDouble:clamped forKey:kAlertIntervalPref];
+    [self notifyChanged];
+}
+
 - (NSTimeInterval)cooldownSeconds {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     if (![defaults objectForKey:kAlertCooldownPref]) return kMenuMeterAlertCooldownDefault;
@@ -166,8 +187,9 @@ static NSString * const kAlertConsecutivePref     = @"AlertConsecutiveSamples";
     if (parts.count == 0) {
         return NSLocalizedString(@"Alerts are on, but no threshold is set, so nothing is watched.", @"alert");
     }
-    return [NSString stringWithFormat:NSLocalizedString(@"Watching: %@. Re-notifies at most every %.0f min, after %ld samples in a row.", @"alert"),
-            [parts componentsJoinedByString:@", "], self.cooldownSeconds / 60.0, (long)self.consecutiveSamples];
+    return [NSString stringWithFormat:NSLocalizedString(@"Watching: %@. Checked every %.0f s, notifies after %ld samples in a row, then at most every %.0f min.", @"alert"),
+            [parts componentsJoinedByString:@", "], self.checkIntervalSeconds,
+            (long)self.consecutiveSamples, self.cooldownSeconds / 60.0];
 }
 
 - (void)sendTestNotificationWithCompletion:(void (^)(BOOL, NSString *))completion {
@@ -315,6 +337,10 @@ static NSString * const kAlertConsecutivePref     = @"AlertConsecutiveSamples";
     lastNotified[key] = now;
     [self deliverTitle:title body:body];
     NSLog(@"MenuMeterAlerts: %@", body);
+}
+
+- (void)resetStreaks {
+    [streaks removeAllObjects];
 }
 
 - (NSString *)humanBytes:(double)bytesPerSecond {

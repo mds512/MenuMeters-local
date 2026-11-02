@@ -17,6 +17,7 @@ static const double kBytesPerMB = 1000.0 * 1000.0;
     NSTextField *cpuField;
     NSTextField *diskField;
     NSTextField *networkField;
+    NSTextField *intervalField;
     NSTextField *cooldownField;
     NSTextField *consecutiveField;
 
@@ -90,8 +91,13 @@ static const double kBytesPerMB = 1000.0 * 1000.0;
     // --- Rate limiting -----------------------------------------------------
     [stack addArrangedSubview:[self spacer]];
 
+    intervalField = [self numberField];
     cooldownField = [self numberField];
     consecutiveField = [self numberField];
+
+    [stack addArrangedSubview:[self row:NSLocalizedString(@"Check readings every", @"alerts prefs")
+                                  field:intervalField
+                                   unit:NSLocalizedString(@"seconds", @"alerts prefs")]];
 
     [stack addArrangedSubview:[self row:NSLocalizedString(@"Repeat at most every", @"alerts prefs")
                                   field:cooldownField
@@ -101,8 +107,10 @@ static const double kBytesPerMB = 1000.0 * 1000.0;
                                    unit:NSLocalizedString(@"samples in a row are over the limit", @"alerts prefs")]];
     [stack addArrangedSubview:[self wrappingLabelWithText:
         NSLocalizedString(@"Requiring more than one sample stops a brief spike — a backup starting, Spotlight "
-                          "indexing — from notifying you. Readings are taken on the interval set in the "
-                          "Reporting tab.", @"alerts prefs")]];
+                          "indexing — from notifying you, at the cost of noticing a little later: something "
+                          "that goes over the limit is reported after one to two checks. This interval is "
+                          "separate from the one in the Reporting tab, so readings can be checked often "
+                          "without sending data any more often.", @"alerts prefs")]];
 
     // --- Test --------------------------------------------------------------
     [stack addArrangedSubview:[self spacer]];
@@ -168,6 +176,7 @@ static const double kBytesPerMB = 1000.0 * 1000.0;
     cpuField.stringValue         = [self stringFromNumber:alerts.cpuLimitPercent];
     diskField.stringValue        = [self stringFromNumber:alerts.diskLimitPercent];
     networkField.stringValue     = [self stringFromNumber:alerts.networkLimitBytesPerSecond / kBytesPerMB];
+    intervalField.stringValue    = [self stringFromNumber:alerts.checkIntervalSeconds];
     cooldownField.stringValue    = [self stringFromNumber:alerts.cooldownSeconds / 60.0];
     consecutiveField.stringValue = [NSString stringWithFormat:@"%ld", (long)alerts.consecutiveSamples];
 
@@ -185,6 +194,7 @@ static const double kBytesPerMB = 1000.0 * 1000.0;
     alerts.cpuLimitPercent            = cpuField.doubleValue;
     alerts.diskLimitPercent           = diskField.doubleValue;
     alerts.networkLimitBytesPerSecond = networkField.doubleValue * kBytesPerMB;
+    alerts.checkIntervalSeconds       = intervalField.doubleValue;
     alerts.cooldownSeconds            = cooldownField.doubleValue * 60.0;
     alerts.consecutiveSamples         = consecutiveField.integerValue;
 
@@ -209,8 +219,8 @@ static const double kBytesPerMB = 1000.0 * 1000.0;
 
 - (void)updateEnabledState {
     BOOL on = (enabledCheckbox.state == NSControlStateValueOn);
-    for (NSTextField *field in @[temperatureField, cpuField, diskField,
-                                 networkField, cooldownField, consecutiveField]) {
+    for (NSTextField *field in @[temperatureField, cpuField, diskField, networkField,
+                                 intervalField, cooldownField, consecutiveField]) {
         field.enabled = on;
     }
 }

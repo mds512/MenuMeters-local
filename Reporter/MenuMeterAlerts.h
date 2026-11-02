@@ -36,6 +36,9 @@ extern NSString * const kMenuMeterAlertSectionNetwork;
 #define kMenuMeterAlertConsecutiveMin     1
 #define kMenuMeterAlertConsecutiveMax     20
 #define kMenuMeterAlertConsecutiveDefault 2
+#define kMenuMeterAlertIntervalMin        5.0
+#define kMenuMeterAlertIntervalMax        3600.0
+#define kMenuMeterAlertIntervalDefault    60.0
 
 @interface MenuMeterAlerts : NSObject
 
@@ -52,6 +55,11 @@ extern NSString * const kMenuMeterAlertSectionNetwork;
 @property (nonatomic, assign) double cpuLimitPercent;
 @property (nonatomic, assign) double diskLimitPercent;
 @property (nonatomic, assign) double networkLimitBytesPerSecond;
+
+// How often the readings are checked, in seconds. Independent of the reporting
+// interval, so alerts can be watched closely without POSTing that often. One
+// timer serves both: it runs at whichever cadence is shorter.
+@property (nonatomic, assign) NSTimeInterval checkIntervalSeconds;
 
 // Shortest gap between two notifications about the same metric while it stays
 // over the line. Clamped to at least kMenuMeterAlertCooldownMin.
@@ -94,6 +102,11 @@ extern NSString * const kMenuMeterAlertSectionNetwork;
 // Evaluates one sample. Must be called on the reporter's serial work queue: the
 // streak and cooldown state is not otherwise synchronised.
 - (void)evaluateSnapshot:(NSDictionary *)snapshot;
+
+// Forgets how long each metric has been over its limit. Called when the limits
+// change, since a streak counted against an old limit means nothing. Same queue
+// requirement as -evaluateSnapshot:.
+- (void)resetStreaks;
 
 @end
 
